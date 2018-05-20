@@ -1,0 +1,343 @@
+---
+title: 'Global Conflict Machine Learning'
+author: "Timothy Pace"
+date: "12/3/2017"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Summary Statistics & Loading of Packages
+## Loads Installs & Loads Packages, Reads Conflict Data
+
+```{r}
+# Installs required packages
+# install.packages("ggplot2")
+# install.packages("dplyr")
+# install.packages("AUC")
+# install.packages("caret")
+# install.packages("xtable")
+
+# Loads packages
+library("ggplot2")
+library("dplyr")
+library("AUC")
+library("caret")
+library("xtable")
+
+options(scipen=999) # Disables scientific notation
+
+conflict_df <- read.csv("ged171.csv") # Loads the data.
+```
+
+## Number of All Unique Observations and Features - Conflicts
+
+```{r}
+# Rows
+nrow(conflict_df)
+
+# Columns
+ncol(conflict_df)
+
+# Column Names
+colnames(conflict_df)
+```
+
+## Summary of Features of Interest - Conflicts.
+
+```{r}
+# Selects df of interest.
+conflict_df_post_91 <- select(conflict_df, id, conflict_name, year, region, country, country_id, region, where_coordinates, 
+                     latitude, longitude, type_of_violence, dyad_name, side_a, deaths_a, 
+                     side_b, deaths_b, deaths_civilians, deaths_unknown, low, best, high)
+
+# Removes Cold War Years
+conflict_df_post_91 <- conflict_df_post_91[conflict_df_post_91$year >= 1991,]
+conflict_df_post_91$type_of_violence <- as.factor(conflict_df_post_91$type_of_violence) # Turns int ToV into factor
+
+# Structure of df.
+str(conflict_df_post_91)
+```
+
+## Summary Statistics for Observations of Interest - Conflicts.
+
+```{r}
+sapply(conflict_df_post_91, summary, na.rm = TRUE, maxsum = 5)
+```
+
+# Question #1 Results: What is the predicted trend in the number of global conflicts?
+
+## Linear Regression.
+
+```{r}
+# Computes distinct conflict names and distinct years.
+conflicts_by_year_df <- conflict_df_post_91 %>% select(conflict_name, year) %>% distinct
+
+# Aggregates count of conflicts by year.
+conflicts_by_year_df <- aggregate(conflict_name ~ year, conflicts_by_year_df, length, na.action = na.omit)
+
+mod1 <- lm(conflict_name ~ year, data = conflicts_by_year_df)
+summary(mod1)
+```
+
+```{r}
+plot(conflicts_by_year_df$conflict_name, x=conflicts_by_year_df$year, type="l", 
+     main="Distinct Conflicts by Year (1991-2016), Linear Regression", xlab="Year", ylab="Distinct Conflicts")
+abline(mod1, col="red")
+```
+
+## Polynomial Regression.
+
+```{r}
+mod2 <- lm(conflicts_by_year_df$conflict_name ~ poly(conflicts_by_year_df$year, 4))
+summary(mod2)
+```
+
+```{r}
+plot(conflicts_by_year_df$conflict_name, x=conflicts_by_year_df$year, type="l", 
+     main="Distinct Conflicts by Year (1991-2016), Polynomial Regression (k = 4)", xlab="Year", ylab="Distinct Conflicts", ylim = c(0,250))
+lines(conflicts_by_year_df$year, predict(mod2), col="red")
+```
+
+## LOESS Modeling.
+
+```{r}
+mod3 <- loess(conflict_name ~ year, data=conflicts_by_year_df, span=0.75, silent = TRUE) # 75% smoothing span
+summary(mod3)
+```
+
+```{r}
+smoothed <- predict(mod3)
+plot(conflicts_by_year_df$conflict_name, x=conflicts_by_year_df$year, type="l", main="Distinct Conflicts by Year (1991-2016), LOESS Regression", xlab="Year", ylab="Distinct Conflicts")
+lines(smoothed, x=conflicts_by_year_df$year, col="red")
+```
+
+
+# Question 2: What is the predicted trend in the number of total fatalities from global conflict?
+
+## Linear Modeling.
+
+```{r}
+total_deaths_df <- aggregate(. ~ year, conflict_df_post_91, sum, na.action = na.omit)
+
+# Best estimate of fatalities vs. year
+mod1 <- lm(best ~ year, data = total_deaths_df)
+summary(mod1)
+```
+
+
+```{r}
+plot(total_deaths_df$best, x=total_deaths_df$year, type="l", 
+     main="Global Deaths from Conflict (1991-2016), \nLinear Regression", xlab="Year", ylab="Total Deaths")
+abline(mod1, col="red")
+```
+
+Removes the Rwandan Genocide from analyses as an outlier.
+
+```{r}
+total_deaths_df <- conflict_df_post_91[conflict_df_post_91$conflict_name != 'Government of Rwanda - Civilians',]
+total_deaths_no_rg_df <- aggregate(. ~ year, total_deaths_df, sum, na.action = na.omit)
+```
+
+
+```{r}
+mod1 <- lm(best ~ year, data = total_deaths_no_rg_df)
+summary(mod1)
+```
+
+```{r}
+plot(total_deaths_no_rg_df$best, x=total_deaths_no_rg_df$year, type="l", 
+     main="Global Deaths from Conflict (1991-2016) \nExcluding the Rwandan Genocide (Linear Regression)", xlab="Year", ylab="Total Deaths")
+abline(mod1, col="red")
+```
+
+## Polynomial Modeling.
+
+```{r}
+# Best estimate of fatalities vs. year
+mod3 <- lm(total_deaths_no_rg_df$best ~ poly(total_deaths_no_rg_df$year, 4))
+summary(mod3)
+```
+
+```{r}
+plot(total_deaths_no_rg_df$best, x=total_deaths_no_rg_df$year, type="l", 
+     main="Global Deaths from Conflict (1991-2016) \nExcluding the Rwandan Genocide (Polynomial Regression, k = 4)", xlab="Year", ylab="Total Deaths", ylim=c(0, 100000))
+lines(total_deaths_no_rg_df$year, predict(mod3), col="red")
+```
+
+```{r}
+mod4 <- loess(best ~ year, data=total_deaths_no_rg_df, span=0.75, silent = TRUE)
+summary(mod4)
+```
+
+```{r}
+smoothed <- predict(mod4)
+
+plot(total_deaths_no_rg_df$best, x=total_deaths_no_rg_df$year, type="l", main="Global Deaths from Conflict (1991-2016) \nExcluding the Rwandan Genocide (LOESS Regression)", xlab="Year", ylab="Total Deaths")
+lines(smoothed, x=total_deaths_no_rg_df$year, col="red")
+```
+
+# Predicted trend in the number of civilian fatalities from global conflict
+
+## Linear Modeling
+
+```{r}
+civilian_deaths_df <- aggregate(. ~ year, conflict_df_post_91, sum, na.action = na.omit)
+
+# Best estimate of fatalities vs. year
+mod1 <- lm(deaths_civilians ~ year, data = civilian_deaths_df)
+summary(mod1)
+```
+
+```{r}
+plot(civilian_deaths_df$deaths_civilians, x=civilian_deaths_df$year, type="l", 
+     main="Global Civilian Deaths from Conflict (1991-2016), \nLinear Regression", xlab="Year", ylab="Total Deaths")
+abline(mod1, col="red")
+```
+
+Removes the Rwandan Genocide from analyses as an outlier.
+
+```{r}
+civilian_deaths_df <- conflict_df_post_91[conflict_df_post_91$conflict_name != 'Government of Rwanda - Civilians',]
+civilian_deaths_no_rg_df <- aggregate(. ~ year, civilian_deaths_df, sum, na.action = na.omit)
+```
+ 
+```{r}
+mod1 <- lm(deaths_civilians ~ year, data = civilian_deaths_no_rg_df)
+summary(mod1)
+```
+
+```{r}
+plot(civilian_deaths_no_rg_df$deaths_civilians, x=civilian_deaths_no_rg_df$year, type="l", 
+     main="Global Civilian Deaths from Conflict (1991-2016) \nExcluding the Rwandan Genocide (Linear Regression)", xlab="Year", ylab="Total Deaths")
+abline(mod1, col="red")
+```
+
+## Polynomial Modeling.
+
+```{r}
+mod3 <- lm(civilian_deaths_no_rg_df$deaths_civilians ~ poly(civilian_deaths_no_rg_df$year, 4))
+summary(mod3)
+```
+
+```{r}
+plot(civilian_deaths_no_rg_df$deaths_civilians, x=civilian_deaths_no_rg_df$year, type="l", 
+     main="Global Civilian Deaths from Conflict (1991-2016) \nExcluding the Rwandan Genocide (Polynomial Regression, k = 4)", xlab="Year", ylab="Total Deaths", ylim=c(0, 40000))
+lines(civilian_deaths_no_rg_df$year, predict(mod3), col="red")
+```
+
+## LOESS Modeling
+
+```{r}
+mod4 <- loess(deaths_civilians ~ year, data=civilian_deaths_no_rg_df, span=0.75, silent = TRUE)
+summary(mod4)
+```
+
+Plotting LOESS regression.
+
+```{r}
+smoothed <- predict(mod4)
+
+plot(civilian_deaths_no_rg_df$deaths_civilians, x=civilian_deaths_no_rg_df$year, type="l", main="Global Civilian Deaths from Conflict (1991-2016) \nExcluding the Rwandan Genocide (LOESS Regression)", xlab="Year", ylab="Total Deaths")
+lines(smoothed, x=civilian_deaths_no_rg_df$year, col="red")
+```
+
+# Factors (e.g. parties involved, region, type of violence, etc.) predicting whether or not there are civilian fatalities in conflict events of violence
+
+## Logistic Regression of Civilian fatalities.
+
+```{r}
+# Creates a binary variable for civilian fatalities for logistic regression, and a new DF.
+civs_died_lgm_df <- conflict_df_post_91
+civs_died_lgm_df$civilians_died <- rep(NA, length(civs_died_lgm_df$deaths_civilians))
+civs_died_lgm_df$civilians_died[civs_died_lgm_df$deaths_civilians == 0] <- 0
+civs_died_lgm_df$civilians_died[civs_died_lgm_df$deaths_civilians >= 1] <- 1
+
+summary(civs_died_lgm_df$civilians_died)
+```
+
+```{r}
+summary(civs_died_lgm_df$deaths_civilians)
+```
+
+```{r}
+str(civs_died_lgm_df)
+```
+
+
+## Runs the initial logistic regression model. 
+
+If quickly re-producing, comment out (takes roughly 30-60 mins).
+```{r}
+mod1 <- glm(formula = civilians_died ~ deaths_a + side_a + type_of_violence + region,
+            family = binomial, data = civs_died_lgm_df, na.action = na.omit)
+
+summary(mod1)
+```
+
+## Stepwise Regression.
+
+Performs stepwise regression; If quickly re-producing, comment out (otherwise, leave running overnight or for several hours).
+```{r}
+mod2 <- step(mod1, trace = 0)
+formula(mod2)
+```
+
+## Generates the final logistic regression model (takes roughly 30-60 mins).
+
+Civilian fatalities as predicted by "side a" (always a government side or aggressor), deaths on side a, the type of violence (e.g., state-based, non-state, one-sided), and the region. 
+```{r}
+mod2 <- glm(formula = civilians_died ~ deaths_a + side_a + type_of_violence + region, 
+            family = binomial, data = civs_died_lgm_df, na.action = na.omit)
+print(summary(mod2))
+```
+
+## Quick test case.
+```{r}
+new_data = data.frame(deaths_a = 0, side_a = 'IS', type_of_violence = "3", region = 'Middle East')
+predict(mod2, new_data, type = "response")
+```
+
+## Prints the values, sorting by p-values ascending in a table.
+```{r, results = 'asis'}
+idx <- order(coef(summary(mod2))[,4]) # sorts by p-value ascending
+out <- coef(summary(mod2))[idx,] # reorders variablename, coef, SE by p-value ascending
+print(xtable(out))
+```
+
+## Plots AUC curve.
+```{r}
+fits <- fitted(mod2)
+y <- factor(civs_died_lgm_df$civilians_died)
+rr <- roc(fits, y)
+plot(rr, main = "ROC Curve")
+
+# AUC Score
+auc(rr)
+```
+
+## Uses the caret library to perform 10-fold cross validation.
+```{r}
+# The caret R library requires factors for cross validation logistic regression,
+# so we re-create our number of civilian death, dummy variable as a factor.
+civs_died_lgm_df$civilians_died_fact <- rep(NA, length(civs_died_lgm_df$deaths_civilians))
+civs_died_lgm_df$civilians_died_fact[civs_died_lgm_df$deaths_civilians == 0] <- "No_Civilian_Deaths"
+civs_died_lgm_df$civilians_died_fact[civs_died_lgm_df$deaths_civilians >= 1] <- "Civilian_Deaths"
+
+# Create 10 training sets using cross validation.
+train_control <- trainControl(method="cv", number=10, classProbs=TRUE, summaryFunction = twoClassSummary)
+
+# Performs cross-validations.
+final_mod <- train(civilians_died_fact ~ deaths_a + side_a + type_of_violence + region,
+                   data = civs_died_lgm_df, method="glm", family = "binomial",
+                   trControl = train_control, metric = "ROC", maximize = TRUE)
+
+# Summarizes the results.
+print(final_mod)
+```
